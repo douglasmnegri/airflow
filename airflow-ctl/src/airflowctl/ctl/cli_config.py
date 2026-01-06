@@ -91,7 +91,8 @@ def safe_call_command(function: Callable, args: Iterable[Arg]) -> None:
     except httpx.ReadTimeout as e:
         rich.print(f"[red]Read timeout error: {e}[/red]")
         if "timed out" in str(e):
-            rich.print("[red]Please check if the server is running and the API ready to accept calls.[/red]")
+            rich.print(
+                "[red]Please check if the server is running and the API ready to accept calls.[/red]")
     except ServerResponseError as e:
         rich.print(f"Server response error: {e}")
         if "Client error message:" in str(e):
@@ -112,7 +113,8 @@ class DefaultHelpParser(argparse.ArgumentParser):
     def error(self, message):
         """Override error and use print_help instead of print_usage."""
         self.print_help()
-        self.exit(2, f"\n{self.prog} command error: {message}, see help above.\n")
+        self.exit(
+            2, f"\n{self.prog} command error: {message}, see help above.\n")
 
 
 # Used in Arg to enable `None` as a distinct value from "not passed"
@@ -170,7 +172,8 @@ def positive_int(*, allow_zero):
                 return value
         except ValueError:
             pass
-        raise argparse.ArgumentTypeError(f"invalid positive int value: '{value}'")
+        raise argparse.ArgumentTypeError(
+            f"invalid positive int value: '{value}'")
 
     return _check
 
@@ -376,13 +379,16 @@ class CommandFactory:
         self.args_map = {}
         self.commands_map = {}
         self.group_commands_list = []
-        self.file_path = inspect.getfile(BaseOperations) if file_path is None else file_path
+        self.file_path = inspect.getfile(
+            BaseOperations) if file_path is None else file_path
         # Excluded Lists are in Class Level for further usage and avoid searching them
         # Exclude parameters that are not needed for CLI from datamodels
         self.excluded_parameters = ["schema_"]
         # This list is used to determine if the command/operation needs to output data
-        self.output_command_list = ["list", "get", "create", "delete", "update", "trigger"]
-        self.exclude_operation_names = ["LoginOperations", "VersionOperations", "BaseOperations"]
+        self.output_command_list = ["list", "get",
+                                    "create", "delete", "update", "trigger"]
+        self.exclude_operation_names = [
+            "LoginOperations", "VersionOperations", "BaseOperations"]
         self.exclude_method_names = [
             "error",
             "__init__",
@@ -402,13 +408,18 @@ class CommandFactory:
             """Extract function name, arguments, and return annotation."""
             func_name = node.name
             args = []
-            return_annotation: str = ""
+            for arg in node.args.posonlyargs:
+                arg_name = arg.arg
+                arg_type = ast.unparse(
+                    arg.annotation) if arg.annotation else "Any"
+                args.append({arg_name: arg_type, "is_positional": True})
 
             for arg in node.args.args:
                 arg_name = arg.arg
-                arg_type = ast.unparse(arg.annotation) if arg.annotation else "Any"
+                arg_type = ast.unparse(
+                    arg.annotation) if arg.annotation else "Any"
                 if arg_name != "self":
-                    args.append({arg_name: arg_type})
+                    args.append({arg_name: arg_type, "is_positional": False})
 
             if node.returns:
                 return_annotation = [
@@ -437,7 +448,8 @@ class CommandFactory:
             ):
                 for child in node.body:
                     if isinstance(child, ast.FunctionDef) and child.name not in self.exclude_method_names:
-                        self.operations.append(get_function_details(node=child, parent_node=node))
+                        self.operations.append(get_function_details(
+                            node=child, parent_node=node))
 
     @staticmethod
     def _sanitize_arg_parameter_key(parameter_key: str) -> str:
@@ -475,7 +487,8 @@ class CommandFactory:
         API.
         """
         if "|" in str(type_name):
-            type_name = [t.strip() for t in str(type_name).split("|") if t.strip() != "None"].pop()
+            type_name = [t.strip() for t in str(type_name).split(
+                "|") if t.strip() != "None"].pop()
         mapping: dict[str, type | Callable] = {
             "int": int,
             "float": float,
@@ -530,8 +543,10 @@ class CommandFactory:
             if type(field_type.annotation) is type:
                 commands.append(
                     self._create_arg(
-                        arg_flags=("--" + self._sanitize_arg_parameter_key(field),),
-                        arg_type=self._python_type_from_string(field_type.annotation),
+                        arg_flags=(
+                            "--" + self._sanitize_arg_parameter_key(field),),
+                        arg_type=self._python_type_from_string(
+                            field_type.annotation),
                         arg_action=argparse.BooleanOptionalAction if field_type.annotation is bool else None,  # type: ignore
                         arg_help=f"{field} for {parameter_key} operation",
                         arg_default=False if field_type.annotation is bool else None,
@@ -545,7 +560,8 @@ class CommandFactory:
 
                 commands.append(
                     self._create_arg(
-                        arg_flags=("--" + self._sanitize_arg_parameter_key(field),),
+                        arg_flags=(
+                            "--" + self._sanitize_arg_parameter_key(field),),
                         arg_type=self._python_type_from_string(annotation),
                         arg_action=argparse.BooleanOptionalAction if annotation is bool else None,  # type: ignore
                         arg_help=f"{field} for {parameter_key} operation",
@@ -559,29 +575,42 @@ class CommandFactory:
         for operation in self.operations:
             args = []
             for parameter in operation.get("parameters"):
-                for parameter_key, parameter_type in parameter.items():
-                    if self._is_primitive_type(type_name=parameter_type):
-                        is_bool = parameter_type == "bool"
-                        args.append(
-                            self._create_arg(
-                                arg_flags=("--" + self._sanitize_arg_parameter_key(parameter_key),),
-                                arg_type=self._python_type_from_string(parameter_type),
-                                arg_action=argparse.BooleanOptionalAction if is_bool else None,
-                                arg_help=f"{parameter_key} for {operation.get('name')} operation in {operation.get('parent').name}",
-                                arg_default=False if is_bool else None,
-                            )
-                        )
+                is_positional = parameter.get("is_positional", False)
+                parameter_key = next(
+                    k for k in parameter.keys() if k != "is_positional")
+                parameter_type = parameter[parameter_key]
+                if self._is_primitive_type(type_name=parameter_type):
+                    is_bool = parameter_type == "bool"
+                    if is_positional:
+                        arg_flags = (
+                            self._sanitize_arg_parameter_key(parameter_key),)
                     else:
-                        args.extend(
-                            self._create_arg_for_non_primitive_type(
-                                parameter_type=parameter_type, parameter_key=parameter_key
-                            )
+                        arg_flags = (
+                            "--" + self._sanitize_arg_parameter_key(parameter_key),)
+
+                    args.append(
+                        self._create_arg(
+                            arg_flags=arg_flags,
+                            arg_type=self._python_type_from_string(
+                                parameter_type),
+                            arg_dest=parameter_key if not is_positional else None,
+                            arg_action=argparse.BooleanOptionalAction if is_bool else None,
+                            arg_help=f"{parameter_key} for {operation.get('name')} operation in {operation.get('parent').name}",
+                            arg_default=False if is_bool else None,
                         )
+                    )
+                else:
+                    args.extend(
+                        self._create_arg_for_non_primitive_type(
+                            parameter_type=parameter_type, parameter_key=parameter_key
+                        )
+                    )
 
             if any(operation.get("name").startswith(cmd) for cmd in self.output_command_list):
                 args.extend([ARG_OUTPUT, ARG_AUTH_ENVIRONMENT])
 
-            self.args_map[(operation.get("name"), operation.get("parent").name)] = args
+            self.args_map[(operation.get("name"),
+                           operation.get("parent").name)] = args
 
     def _create_func_map_from_operation(self):
         """Create function map from Operation Method checking for parameters and return types."""
@@ -590,10 +619,13 @@ class CommandFactory:
         def _get_func(args: Namespace, api_operation: dict, api_client: Client = NEW_API_CLIENT, **kwargs):
             import importlib
 
-            imported_operation = importlib.import_module("airflowctl.api.operations")
-            operation_class_object = getattr(imported_operation, api_operation["parent"].name)
+            imported_operation = importlib.import_module(
+                "airflowctl.api.operations")
+            operation_class_object = getattr(
+                imported_operation, api_operation["parent"].name)
             operation_class = operation_class_object(client=api_client)
-            operation_method_object = getattr(operation_class, api_operation["name"])
+            operation_method_object = getattr(
+                operation_class, api_operation["name"])
 
             # Walk through all args and create a dictionary such as args.abc -> {"abc": "value"}
             method_params = {}
@@ -601,23 +633,25 @@ class CommandFactory:
             datamodel_param_name = None
             args_dict = vars(args)
             for parameter in api_operation["parameters"]:
-                for parameter_key, parameter_type in parameter.items():
-                    if self._is_primitive_type(type_name=parameter_type):
-                        method_params[self._sanitize_method_param_key(parameter_key)] = args_dict[
-                            parameter_key
-                        ]
-                    else:
-                        datamodel = getattr(generated_datamodels, parameter_type)
-                        for expanded_parameter in self.datamodels_extended_map[parameter_type]:
-                            if parameter_key not in method_params:
-                                method_params[parameter_key] = {}
-                                datamodel_param_name = parameter_key
-                            if expanded_parameter in self.excluded_parameters:
-                                continue
-                            if expanded_parameter in args_dict.keys():
-                                method_params[parameter_key][
-                                    self._sanitize_method_param_key(expanded_parameter)
-                                ] = args_dict[expanded_parameter]
+                parameter_key = next(
+                    k for k in parameter.keys() if k != "is_positional")
+                parameter_type = parameter[parameter_key]
+                if self._is_primitive_type(type_name=parameter_type):
+                    method_params[self._sanitize_method_param_key(
+                        parameter_key)] = args_dict[parameter_key]
+                else:
+                    datamodel = getattr(generated_datamodels, parameter_type)
+                    for expanded_parameter in self.datamodels_extended_map[parameter_type]:
+                        if parameter_key not in method_params:
+                            method_params[parameter_key] = {}
+                            datamodel_param_name = parameter_key
+                        if expanded_parameter in self.excluded_parameters:
+                            continue
+                        if expanded_parameter in args_dict.keys():
+                            method_params[parameter_key][
+                                self._sanitize_method_param_key(
+                                    expanded_parameter)
+                            ] = args_dict[expanded_parameter]
 
             if datamodel:
                 if datamodel_param_name:
@@ -657,7 +691,8 @@ class CommandFactory:
                         if isinstance(value, list):
                             dict_obj[key] = value
                         if isinstance(value, dict):
-                            dict_obj[key] = check_operation_and_collect_list_of_dict(value)
+                            dict_obj[key] = check_operation_and_collect_list_of_dict(
+                                value)
 
                 # If dict_obj only have single key return value instead of list
                 # This can happen since we are excluding some keys from user such as total_entries from list operations
@@ -777,7 +812,8 @@ AUTH_COMMANDS = (
         help="Login to the metadata database for personal usage. JWT Token must be provided via parameter.",
         description="Login to the metadata database",
         func=lazy_load_command("airflowctl.ctl.commands.auth_command.login"),
-        args=(ARG_AUTH_URL, ARG_AUTH_TOKEN, ARG_AUTH_ENVIRONMENT, ARG_AUTH_USERNAME, ARG_AUTH_PASSWORD),
+        args=(ARG_AUTH_URL, ARG_AUTH_TOKEN, ARG_AUTH_ENVIRONMENT,
+              ARG_AUTH_USERNAME, ARG_AUTH_PASSWORD),
     ),
 )
 
@@ -801,8 +837,10 @@ CONNECTION_COMMANDS = (
     ActionCommand(
         name="import",
         help="Import connections from a file exported with local CLI.",
-        func=lazy_load_command("airflowctl.ctl.commands.connection_command.import_"),
-        args=(Arg(flags=("file",), metavar="FILEPATH", help="Connections JSON file"),),
+        func=lazy_load_command(
+            "airflowctl.ctl.commands.connection_command.import_"),
+        args=(Arg(flags=("file",), metavar="FILEPATH",
+              help="Connections JSON file"),),
     ),
 )
 
@@ -849,7 +887,8 @@ VARIABLE_COMMANDS = (
     ActionCommand(
         name="import",
         help="Import variables from a file exported with local CLI.",
-        func=lazy_load_command("airflowctl.ctl.commands.variable_command.import_"),
+        func=lazy_load_command(
+            "airflowctl.ctl.commands.variable_command.import_"),
         args=(ARG_FILE, ARG_VARIABLE_ACTION_ON_EXISTING_KEY),
     ),
 )
@@ -885,7 +924,8 @@ core_commands: list[CLICommand] = [
         name="version",
         help="Show version information",
         description="Show version information",
-        func=lazy_load_command("airflowctl.ctl.commands.version_command.version_info"),
+        func=lazy_load_command(
+            "airflowctl.ctl.commands.version_command.version_info"),
         args=(
             ARG_AUTH_ENVIRONMENT,
             ARG_REMOTE,
